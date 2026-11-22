@@ -1,170 +1,167 @@
-# SpecMine v1.1 — 500-repository sample
+# SpecMine Research Project
 
-SpecMine is a large-scale corpus of **Spec-Driven Development (SDD)** artifacts
-mined from public GitHub repositories: the Markdown specifications that AI coding
-agents turn into code, attributed to the tool that produced them, enriched with
-full repository metadata and commit history, and, for a subsample of
-repositories, followed into the pull requests that change them.
+## Research question
 
-This repository is the **curated 500-repository sample** for the MSR 2027 Mining
-Challenge. It is a faithful slice of every layer of the full dataset, small enough
-to clone and query in minutes. The full v1.0 dataset (MySQL dump plus CSV/Parquet
-exports and the complete spec-contents JSONL) is published on Zenodo, with a
-per-table Parquet mirror on Hugging Face:
+This project investigates whether the quality of software specifications is associated with subsequent code-related pull request (PR) activity. The analysis focuses on eligible specifications for which an initial implementation PR can be identified, then measures later merged PR activity involving code paths changed by that initial implementation.
 
-- **Full dataset (Zenodo, citable DOI):** <https://doi.org/10.5281/zenodo.22102779>
-- **Parquet mirror (Hugging Face):** <https://huggingface.co/datasets/ShyAgarwal/specmine>
-- **Snapshot:** SpecMine v1.1, July 2026 snapshot (Kiro census fully enriched in v1.1:
-  content, repository objects, commit histories capped at the broad census's
-  2026-07-11 crawl end, and the 39 features — this sample carries the enriched
-  Kiro tables for its 100 Kiro repositories).
+The analysis uses two observation windows:
 
-## What SpecMine captures (full dataset)
+- **30 days:** primary analysis window.
+- **90 days:** robustness analysis window.
 
-| Layer | Count | This sample |
-|---|---:|---|
-| Broad census (`spec.md`/`specs.md`, 17 named tools) | 470,795 specs / 73,030 repos | 28,583 specs / 415 repos |
-| Kiro census (`.kiro/specs` requirements/design/tasks) | 98,574 artifacts / 12,910 repos | 18,585 / 100 repos |
-| PR layer (spec-touching PRs, ≥10-star repos) | 5,992 PRs / 581 repos | 5,335 PRs / 229 repos |
-| OpenSpec change artifacts | 266,230 | 22,992 |
-| Traceability index (typed references) | 2,421,323 | 261,032 |
+The outcome is **follow-up code PR activity**, not a direct measure of bug fixes. Follow-up PRs may include fixes, feature work, refactoring, or other changes.
 
-The PR sweep targeted 11 tools, but `specweave` yielded no spec-touching PRs, so
-**10 tools** actually appear in `pull_requests` (both in the full dataset and this
-sample).
+## Repository / notebook
 
-The 500 sample repositories were selected to cover every one of the 17 named
-tools and 4 path buckets, the Kiro census, and the PR layer. Selection is
-reproducible (see `sample_repos.txt` for the exact list): the PR-richest 229
-repositories, at least three repositories per named tool, and the highest-starred
-broad-census repositories to bring the broad-census set to 400, plus 100 Kiro
-repositories. Because 15 of those Kiro repositories also carry a `spec.md`, the
-final counts are 415 distinct broad-census repositories and 85 Kiro-only, for 500
-in total.
+The main analysis is in:
 
-**The sample is deliberately not representative of the full corpus.** Because it
-is star-curated, 61% of its broad-census repositories have ≥100 stars and 82% are
-licensed, against 1.3% and 39% in the full corpus; its specs also skew more recent
-(97.5% first committed in 2026 vs 92%). Use the sample to learn the schema and
-prototype queries, not to estimate population rates.
+- `specmine_clean_30_90_day_analysis.ipynb` — cleaned analysis notebook with filtering, implementation identification, follow-up outcome construction, descriptive analysis, sample-window comparisons, negative binomial regressions, and exports.
 
-## Layout
+Run the notebook cells in order, from top to bottom.
 
-```
-data/                         Parquet, one file per released table (zstd)
-  spec_files.parquet          broad-census spine (repo object, provenance, attribution)
-  spec_file_commits.parquet   per-file commit history
-  spec_content_features.parquet   39 structural / requirement-template features per spec
-  spec_links.parquet          traceability index (typed references)
-  kiro_files.parquet          Kiro requirements / design / tasks (+ content hashes, commit counts)
-  kiro_repos.parquet          v1.1: repository objects for the sample's Kiro repos
-  kiro_file_commits.parquet   v1.1: per-artifact Kiro commit histories
-  kiro_content_features.parquet   v1.1: 39 features over Kiro artifact content
-  openspec_artifact_files.parquet   OpenSpec proposals / designs / task lists (+ content)
-  openspec_code_refs.parquet  OpenSpec task-to-code refs resolved on the git tree
-  pull_requests.parquet       PR layer: the 11 <tool>_prs tables unioned (10 non-empty), with a `tool` column
-  pr_files.parquet            PR layer: per-file changesets, each file flagged spec/code
-  repo_trees.parquet          git-tree metadata references resolve against
-specs.jsonl.gz                raw Markdown of every sample broad-census spec
-kiro_specs.jsonl.gz           v1.1: raw Markdown of the sample's Kiro artifacts
-schema.sql                    CREATE TABLE for each shipped table (MySQL types)
-DATA_DICTIONARY.md            every shipped column, typed and described
-sample_repos.txt              the 500 repo_name values in this sample
-load.py                       load the Parquet with pandas and run the flagship query
-example.ipynb                 worked examples over the sample
+## Data requirements
+
+Place the following Parquet files in a `data/` directory alongside the notebook:
+
+```text
+data/
+├── spec_files.parquet
+├── spec_content_features.parquet
+├── pull_requests.parquet
+└── pr_files.parquet
 ```
 
-Every identifier (`repo_name`, `file_url`, `pr_number`) is a live GitHub value,
-so any row can be re-fetched or joined to external sources.
+The notebook uses these tables:
 
-## Quick start
+| File | Role |
+|---|---|
+| `spec_files.parquet` | Specification file metadata, including repository, path, and spec tool. |
+| `spec_content_features.parquet` | Language, content, placeholder, and substantive-feature measures used to filter and score specs. |
+| `pull_requests.parquet` | PR metadata, merge status/date, and code-change indicators. |
+| `pr_files.parquet` | Files changed by each PR, including spec/code classifications. |
 
-```bash
-pip install pandas pyarrow            # duckdb optional
-python load.py                        # loads every table, prints a summary + the co-change query
-```
+These datasets are not included in this repository/notebook distribution. Access to the collected data is required to reproduce the analysis.
 
-Pandas:
+## Eligibility criteria
 
-```python
-import pandas as pd
-prs = pd.read_parquet("data/pull_requests.parquet")
-prf = pd.read_parquet("data/pr_files.parquet")
+A specification is considered eligible if it:
 
-# "which specs change in the same PR as code?" — the flagship spec->code query
-cochange = prs[prs.touches_code == 1]
-files = prf.merge(cochange[["tool", "repo_name", "pr_number"]],
-                  on=["tool", "repo_name", "pr_number"])
-print(files[files.is_spec == 1].shape, "spec files changed alongside code")
-```
+1. Is identified as English.
+2. Has at least 100 words, 10 lines, and 2 headings.
+3. Does not contain detected lorem ipsum or unfilled placeholders.
+4. Contains at least 2 of the 8 substantive features below.
 
-DuckDB (query the Parquet directly, no load step):
+The eight binary substantive features are:
 
-```sql
-SELECT tool, COUNT(*) AS cochange_prs
-FROM 'data/pull_requests.parquet'
-WHERE touches_code = 1
-GROUP BY tool ORDER BY cochange_prs DESC;
-```
+- Requirements
+- Acceptance criteria
+- User scenarios
+- Success criteria
+- Purpose
+- Overview
+- Edge cases
+- Dependencies
 
-Spec text (`specs.jsonl.gz`) joins to `spec_files` on `file_url_sha16`:
+The specification quality score is the sum of these eight features (0–8). Because eligibility requires at least two substantive features, eligible specs have scores of at least 2.
 
-```python
-import gzip, json
-with gzip.open("specs.jsonl.gz", "rt") as f:
-    specs = [json.loads(l) for l in f]      # {file_url_sha16, repo_name, file_path, spec_tool, spec_role, content}
-```
+## Initial implementation and outcome construction
 
-MySQL: create the tables with `schema.sql`, then load each Parquet (for example
-with `pandas.DataFrame.to_sql`, or convert to CSV and `LOAD DATA`).
+An **initial implementation PR** is defined as the earliest merged PR in the collected data that modifies an eligible specification and code.
 
-## How the sample maps to the full release
+Follow-up PRs are counted if they:
 
-- **PR layer.** The full MySQL release stores the PR layer as 11 per-tool table
-  pairs (`openspec_prs`/`openspec_pr_files`, `speckit_prs`/`speckit_pr_files`, and
-  so on). This sample unions them into `pull_requests.parquet` and
-  `pr_files.parquet` and adds a `tool` column, which is easier to query and
-  loses nothing.
-- **What "spec-touching" means, and orphan PRs.** A PR enters the sweep when a
-  commit that modified a spec file is associated with it (GitHub's
-  `/commits/{sha}/pulls`); the changeset then comes from the PR's net diff
-  (`/pulls/{num}/files`). These two GitHub views can disagree, so a few PRs carry
-  `n_spec_files = 0`: 5 of 5,992 (0.08%) in the full dataset, 3 because the diff is
-  truncated at GitHub's 3,000-file-per-PR cap and 2 because the spec commit sits in
-  shared or ancestor history that the net diff no longer shows. Filter on
-  `n_spec_files > 0` if you need every PR to contain a visible spec file.
-- **Kept set.** Both the sample and the full release ship only kept specs
-  (`not_spec_filter = 0`). The not-a-spec filter (package caches, vendored trees,
-  pre-2024 files) is a documented, reversible rule, so any excluded file can be
-  recovered by re-running the pipeline or re-fetching it from GitHub.
-- **Dropped columns.** Commit-email addresses, GPG-signature blobs, and avatar
-  URLs are dropped at release time; raw `file_content` moves to `specs.jsonl.gz`.
-  Author and committer logins and numeric IDs are kept (they are public and are
-  what makes authorship analysis possible).
+- are merged after the initial implementation PR;
+- modify code; and
+- touch at least one code file/path changed by the initial implementation PR.
 
-## Licensing, ethics, and privacy
+PR records are matched using the composite key `tool`, `repo_name`, and `pr_number`.
 
-All artifacts come from public GitHub repositories, collected within the API
-terms of service. Every repository row keeps its SPDX license so you can filter
-to license-compatible subsets; redistribution follows each repository's own
-terms. Public handles are kept; private contact details are not. Please avoid
-deanonymization and keep personal data out of published results beyond aggregate
-analysis.
+Counts are computed cumulatively for 30- and 90-day windows: a PR counted in the 30-day window is also included in the 90-day window.
 
-## Citation
+A specification without an identifiable initial implementation or without initial code paths to match is not assigned a follow-up count. A zero follow-up count means no matching follow-up PR was identified in the available collected data during the relevant window; it does not prove that the repository had no subsequent activity.
 
-Cite the SpecMine dataset (Zenodo, latest version):
+## Observation cutoff and sample restrictions
 
-```bibtex
-@dataset{specmine_v1_2026,
-  author    = {Agarwal, Shyam and Vasilescu, Bogdan},
-  title     = {SpecMine: A Large-Scale Corpus of Spec-Driven Development Artifacts},
-  year      = {2026},
-  publisher = {Zenodo},
-  doi       = {10.5281/zenodo.22102779},
-  url       = {https://doi.org/10.5281/zenodo.22102779}
-}
-```
+The confirmed data collection cutoff used by the notebook is **July 14, 2026 (UTC)**. To ensure each observation has the full opportunity for follow-up, each model sample is restricted to specs whose initial implementation date is at least the relevant window length before this cutoff:
 
-The accompanying MSR 2027 Mining Challenge paper will be linked here once the
-preprint is posted.
+- 30-day window: initial implementation on or before the cutoff minus 30 days.
+- 90-day window: initial implementation on or before the cutoff minus 90 days.
+
+The notebook reports retained and excluded counts and compares retained vs. excluded observations on available characteristics. These restrictions reduce right-censoring, but can introduce sample-selection differences because the longer window necessarily retains older implementations.
+
+Historical sample flow (from the data version previously analyzed; rerun the notebook to refresh these counts):
+
+| Stage | Specifications |
+|---|---:|
+| Original spec records | 28,583 |
+| English | 27,936 |
+| Passed content / placeholder criteria | 24,240 |
+| Eligible (2+ substantive features) | 6,336 |
+| Identifiable initial implementation | 3,729 |
+
+The 2,607 eligible specs without an identified initial implementation are **not necessarily unimplemented**. Their implementation may be absent from the collected PR data, not linkable under the identification rule, separated from spec changes, or not yet have occurred. Downstream analyses are limited to specs with identifiable implementation events.
+
+## Statistical analysis
+
+### Descriptive analysis
+
+For each follow-up window, the notebook reports:
+
+- sample size and follow-up PR count summaries by quality score;
+- Spearman rank correlation between quality score and follow-up activity;
+- distribution of follow-up PR counts.
+
+### Negative binomial regression
+
+The follow-up outcome is a count and was found to be overdispersed in the analyzed data, so negative binomial regression is used. Standard errors are clustered by repository.
+
+Three model specifications are fit within each window using the same complete-case sample for comparability:
+
+- **M0 — Quality only:** quality score.
+- **M1 — Adjusted:** quality score, log specification word count, and specification tool (OpenSpec reference category).
+- **M2 — Implementation-size sensitivity:** M1 plus the log number of code files changed by the initial implementation PR.
+
+Tools with fewer than 30 observations in a window are grouped into `Other` rather than dropped. M2 is treated as a sensitivity model because implementation size may be downstream of specification quality.
+
+Interpret the quality-score coefficient using the incidence rate ratio (IRR):
+
+- `IRR = exp(coefficient)`
+- Percent change in expected follow-up PR count per one-point quality increase: `(IRR - 1) * 100`
+
+Report effect estimates with confidence intervals and p-values. The analysis is observational and does not establish causality.
+
+## Running the analysis
+
+1. Install Python and Jupyter (or use an environment that supports Jupyter notebooks).
+2. Install the notebook dependencies:
+
+   ```bash
+   pip install numpy pandas matplotlib scipy statsmodels pyarrow jupyter
+   ```
+
+3. Place the required Parquet files in `data/` as described above.
+4. Open `specmine_clean_30_90_day_analysis.ipynb`.
+5. Run all cells from top to bottom.
+
+The notebook prints the sample sizes, descriptive results, and model summaries.
+
+## Outputs
+
+The notebook saves the following files in the working directory:
+
+- `eligible_spec_followups.parquet` — eligible specifications with quality features, implementation metadata, and 30-/90-day follow-up counts.
+- `quality_followup_model_comparison_30_90d.csv` — model comparison summary for the two windows.
+
+## Limitations
+
+- **PR data coverage:** the collected PR data is specification-associated and may not include every PR or code change in a repository.
+- **Implementation identification:** requiring a merged PR that changes both a spec and code may miss implementations linked across separate PRs or through other workflows.
+- **Follow-up measure:** the outcome represents code-related follow-up PR activity, not specifically defects or bug fixes.
+- **Sample selection:** eligible specs without identifiable implementations and specs without complete observation windows are excluded from downstream analyses. These exclusions may be systematic.
+- **Repository and tool heterogeneity:** projects and tools differ in development practices, PR conventions, and data coverage.
+- **Observational design:** estimates describe associations and should not be interpreted as causal effects.
+- **File coverage:** PR-file records may be incomplete or capped for some PRs, which can affect path matching and counts.
+
+## Reproducibility notes
+
+The notebook uses a fixed data cutoff of July 14, 2026 (UTC). Reproducing the reported results requires the same or a clearly documented version of the underlying Parquet datasets and their collection coverage. Refreshing the datasets may change sample sizes and estimates.
